@@ -11,6 +11,8 @@ import { StatusBadge } from "../components/StatusBadge";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { Inbox, Search, Filter, FileText, Cpu, GitBranch, Clock, Loader2, MessageSquare } from "lucide-react";
 import { TableRowSkeleton } from "../components/ui/Skeleton";
+import { fetchMessages, sendMessage, type MessagePayload } from "../api/messages";
+import { useQuery as useRQQuery } from "@tanstack/react-query";
 
 const statusOptions: RequestStatus[] = ["new", "in_progress", "resolved", "rejected"];
 
@@ -47,6 +49,25 @@ export function DepartmentInbox() {
   });
 
   const selected = selectedId ? requests.find((r) => r.id === selectedId) : null;
+  const [response, setResponse] = useState("");
+
+  const {
+    data: messages = [],
+    refetch: refetchMessages,
+    isLoading: loadingMessages,
+  } = useRQQuery({
+    queryKey: ["dept-messages", selected?.id],
+    queryFn: () => fetchMessages(selected!.id),
+    enabled: !!selected?.id,
+  });
+
+  const sendResponseMutation = useMutation({
+    mutationFn: () => sendMessage(selected!.id, response.trim(), user!.id),
+    onSuccess: () => {
+      setResponse("");
+      refetchMessages();
+    },
+  });
 
   function handleStatusChange(requestId: string, status: RequestStatus) {
     updateMutation.mutate({ id: requestId, status });
@@ -227,18 +248,41 @@ export function DepartmentInbox() {
                     <p className="text-xs text-gray-500 mt-1">{new Date(selected.created_at).toLocaleString()}</p>
                   </div>
                 </div>
-                {(selected as { department_reply?: string }).department_reply ? (
-                  <div className="flex gap-2">
-                    <div className="w-8 h-8 rounded-full bg-[#10b981] flex items-center justify-center flex-shrink-0">
-                      <MessageSquare className="w-4 h-4 text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-500">Department response</p>
-                      <p className="text-sm text-[#111827] mt-0.5">{(selected as { department_reply: string }).department_reply}</p>
-                    </div>
-                  </div>
+                {loadingMessages ? (
+                  <p className="text-xs text-gray-500">Loading conversation…</p>
+                ) : messages.length === 0 ? (
+                  <p className="text-xs text-gray-500 italic">No responses yet.</p>
                 ) : (
-                  <p className="text-xs text-gray-500 italic">No response yet.</p>
+                  messages.map((m: MessagePayload) => {
+                    const isUser = m.sender_id === selected.requester_id;
+                    return (
+                      <div key={m.id} className="flex gap-2">
+                        <div
+                          className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                            isUser ? "bg-[#7C3AED]" : "bg-[#10b981]"
+                          }`}
+                        >
+                          {isUser ? (
+                            <span className="text-white text-xs font-medium">U</span>
+                          ) : (
+                            <MessageSquare className="w-4 h-4 text-white" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-gray-500">
+                            {isUser ? "User" : "Agent"} •{" "}
+                            {new Date(m.created_at).toLocaleString(undefined, {
+                              dateStyle: "short",
+                              timeStyle: "short",
+                            })}
+                          </p>
+                          <p className="text-sm text-[#111827] mt-0.5 whitespace-pre-wrap">
+                            {m.message_text}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -274,11 +318,20 @@ export function DepartmentInbox() {
                 Response / Comment
               </h4>
               <textarea
-                placeholder="e.g. Your issue has been forwarded to IT support."
+                value={response}
+                onChange={(e) => setResponse(e.target.value)}
+                placeholder="Type your response to the user..."
                 rows={3}
-                className="w-full px-3 py-2 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm text-[#111827] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/20"
+                className="w-full px-3 py-2 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/20"
               />
-              <p className="text-xs text-gray-500 mt-1">Available when backend supports responses.</p>
+              <button
+                type="button"
+                onClick={() => response.trim() && sendResponseMutation.mutate()}
+                disabled={!response.trim() || sendResponseMutation.isPending}
+                className="mt-2 w-full px-4 py-2.5 bg-[#7C3AED] text-white rounded-xl text-sm font-medium hover:bg-[#6D28D9] disabled:opacity-50"
+              >
+                {sendResponseMutation.isPending ? "Sending..." : "Send Response"}
+              </button>
             </div>
           </div>
         </div>

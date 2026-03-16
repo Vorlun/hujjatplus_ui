@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -13,13 +14,13 @@ import {
   Cell,
 } from "recharts";
 import { useAuth } from "../auth/useAuth";
-import { fetchAllRequests } from "../api/requests";
+import { fetchAllRequests, getFeedbackSummary } from "../api/requests";
 import { fetchDepartments } from "../api/departments";
 import { RequestCard } from "../components/RequestCard";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { Skeleton } from "../components/ui/Skeleton";
 import { SystemUMLDiagram } from "../components/dashboard/SystemUMLDiagram";
-import { buildMonthlyBarData, buildCategoryDonutData } from "../utils/chartData";
+import { buildMonthlyBarData } from "../utils/chartData";
 import {
   LayoutDashboard,
   Building2,
@@ -41,7 +42,48 @@ import {
   Gauge,
   Users,
   ArrowRight,
+  MapPin,
+  Star,
 } from "lucide-react";
+
+function isToday(dateStr: string): boolean {
+  const d = new Date(dateStr);
+  const today = new Date();
+  return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+}
+
+function formatDurationMs(ms: number): string {
+  if (ms < 0 || !Number.isFinite(ms)) return "—";
+  const totalMins = Math.round(ms / 60000);
+  if (totalMins < 60) return `${totalMins}m`;
+  const hours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
+const activityStatusStyles: Record<string, string> = {
+  new: "bg-blue-100 text-blue-700 border-blue-200",
+  in_progress: "bg-amber-100 text-amber-700 border-amber-200",
+  resolved: "bg-green-100 text-green-700 border-green-200",
+  rejected: "bg-red-100 text-red-700 border-red-200",
+};
+
+function formatStatusForActivity(s: string): string {
+  if (s === "new") return "New";
+  if (s === "in_progress") return "In Progress";
+  if (s === "resolved") return "Resolved";
+  if (s === "rejected") return "Rejected";
+  return s;
+}
+
+/** Department donut chart: fixed AI murojaat turlari (category names and percentages) */
+const DEPARTMENT_DONUT_DISPLAY_DATA: { name: string; value: number; fill: string }[] = [
+  { name: "Мурожаатлар", value: 50, fill: "#7C3AED" },
+  { name: "Ҳужжатлар", value: 20, fill: "#3B82F6" },
+  { name: "Сўровлар", value: 15, fill: "#10B981" },
+  { name: "Феэдбаклар", value: 10, fill: "#F59E0B" },
+  { name: "Бошқа", value: 5, fill: "#EF4444" },
+];
 
 const METRIC_CARDS = [
   {
@@ -104,6 +146,11 @@ export function AdminDashboard() {
     queryFn: fetchAllRequests,
     enabled: user?.role === "admin",
   });
+  const { data: feedbackSummary } = useQuery({
+    queryKey: ["feedback-summary"],
+    queryFn: () => getFeedbackSummary(),
+    enabled: user?.role === "admin",
+  });
   const { data: departments = [] } = useQuery({
     queryKey: ["departments"],
     queryFn: fetchDepartments,
@@ -111,10 +158,13 @@ export function AdminDashboard() {
   });
   const error = queryError ? String(queryError) : "";
 
-  if (user?.role !== "admin") {
-    navigate("/dashboard");
-    return null;
-  }
+  useEffect(() => {
+    if (user && user.role !== "admin") {
+      navigate("/dashboard");
+    }
+  }, [user, navigate]);
+
+  if (user?.role !== "admin") return null;
 
   const totalDocs = requests.length;
   const incoming = requests.filter((r) => r.status === "new").length;
@@ -131,8 +181,6 @@ export function AdminDashboard() {
   };
 
   const monthlyBarData = buildMonthlyBarData(requests);
-  const deptIdToName = new Map(departments.map((d) => [d.id, d.name]));
-  const donutData = buildCategoryDonutData(requests, deptIdToName);
   const hasChartData = monthlyBarData.some((m) => m.completed + m.pending + m.overdue > 0);
 
   const totalTasks = totalDocs;
@@ -142,13 +190,37 @@ export function AdminDashboard() {
   const avgCompletionPct =
     totalTasks > 0 ? Math.round((completedCount / totalTasks) * 1000) / 10 : 0;
 
-  const recentRequests = requests.slice(0, 5);
+  const recentRequests = [...requests].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5);
   const deptCounts = requests.reduce<Record<string, number>>((acc, r) => {
     acc[r.department_id] = (acc[r.department_id] ?? 0) + 1;
     return acc;
   }, {});
   const topDeptId = Object.entries(deptCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
   const topDeptName = topDeptId ? departments.find((d) => d.id === topDeptId)?.name ?? null : null;
+
+  const requestsResolvedToday = requests.filter((r) => r.status === "resolved" && r.updated_at && isToday(r.updated_at)).length;
+  const responseTimesMs = requests
+    .filter((r) => r.updated_at && r.status !== "new")
+    .map((r) => new Date(r.updated_at!).getTime() - new Date(r.created_at).getTime());
+  const avgResponseMs = responseTimesMs.length > 0 ? responseTimesMs.reduce((a, b) => a + b, 0) / responseTimesMs.length : null;
+  const avgResponseDisplay = avgResponseMs != null ? formatDurationMs(avgResponseMs) : "—";
+  const agentsHandledToday = new Set(
+    requests
+      .filter((r) => (r.status === "in_progress" || r.status === "resolved") && (r.updated_at && isToday(r.updated_at) || isToday(r.created_at)))
+      .map((r) => (r as RequestListItem).assigned_agent ?? (r as RequestListItem).assigned_agent_name ?? "")
+      .filter(Boolean)
+  ).size;
+  const systemStatus = queryError ? "DEGRADED" : "OK";
+  const systemStatusLabel = queryError ? "Degraded" : "Operational";
+
+  const upcomingDeadlines = [...requests]
+    .filter((r) => r.sla_deadline || r.deadline)
+    .sort(
+      (a, b) =>
+        new Date((a.sla_deadline || a.deadline) as string).getTime() -
+        new Date((b.sla_deadline || b.deadline) as string).getTime()
+    )
+    .slice(0, 5);
 
   return (
     <div className="space-y-8">
@@ -160,6 +232,40 @@ export function AdminDashboard() {
         <p className="text-sm text-gray-500 mt-1">
           System overview and requests
         </p>
+      </div>
+      {/* Upcoming deadlines widget */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 bg-white rounded-xl border border-[#E5E7EB] shadow-sm p-6">
+          <h2 className="text-sm font-semibold text-[#111827] mb-3 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-[#7C3AED]" />
+            Upcoming Deadlines
+          </h2>
+          {upcomingDeadlines.length === 0 ? (
+            <p className="text-xs text-gray-500">No upcoming deadlines.</p>
+          ) : (
+            <ul className="space-y-3 text-sm">
+              {upcomingDeadlines.map((r) => {
+                const dl = r.sla_deadline || r.deadline;
+                return (
+                  <li key={r.id} className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium text-[#111827] truncate">{r.title || r.id}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {new Date(dl as string).toLocaleString(undefined, {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </p>
+                    </div>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#F3F4F6] text-gray-700">
+                      {r.priority}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -287,40 +393,46 @@ export function AdminDashboard() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-[#E5E7EB] p-6 shadow-sm">
+        <div className="bg-white rounded-xl border border-[#E5E7EB] p-6 shadow-sm lg:col-span-2 w-full">
           <h3 className="text-xl font-semibold text-[#111827]">Department Document Distribution</h3>
           <p className="text-sm text-gray-500 mt-1">Distribution by department</p>
-          <div className="mt-6 h-[340px]">
+          <div className="mt-6 w-fit max-w-full mx-auto flex flex-col lg:flex-row items-center justify-center gap-0 min-h-[340px] lg:min-h-[920px]">
             {loading ? (
-              <Skeleton className="h-full w-full rounded-lg" />
-            ) : donutData.length === 0 || (donutData.length === 1 && donutData[0].name === "Ma'lumot yo'q") ? (
-              <div className="h-full flex flex-col items-center justify-center text-gray-500 rounded-xl bg-[#F9FAFB] border border-[#E5E7EB]">
-                <p className="text-sm font-medium">No data yet</p>
-                <p className="text-xs mt-1">Charts will populate when requests exist</p>
-              </div>
+              <Skeleton className="w-full max-w-[900px] h-[400px] lg:h-[900px] rounded-lg flex-shrink-0" />
             ) : (
-              <div className="flex items-center gap-12 w-full h-full">
-                <div className="relative w-[60%] min-w-0 h-full flex-shrink-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
+              <>
+                <div className="w-[320px] h-[320px] sm:w-[560px] sm:h-[560px] lg:w-[900px] lg:h-[900px] max-w-[900px] max-h-[900px] flex-shrink-0 mr-0 pr-0 lg:-mr-5">
+                  <ResponsiveContainer width="100%" height="100%" debounce={0}>
+                    <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                       <Pie
-                        data={donutData}
+                        data={DEPARTMENT_DONUT_DISPLAY_DATA}
                         cx="50%"
                         cy="50%"
-                        innerRadius={80}
-                        outerRadius={120}
+                        innerRadius="30%"
+                        outerRadius="50%"
                         paddingAngle={2}
                         dataKey="value"
                         nameKey="name"
-                        label={({ name, value }) => `${name} ${value}%`}
+                        label={({ cx, cy, midAngle, innerRadius, outerRadius, value, name }) => {
+                          if (name === "No data" || value === 0) return null;
+                          const RADIAN = Math.PI / 180;
+                          const r = (Number(innerRadius) + Number(outerRadius)) / 2;
+                          const x = cx! + r * Math.cos(-midAngle * RADIAN);
+                          const y = cy! + r * Math.sin(-midAngle * RADIAN);
+                          return (
+                            <text x={x} y={y} textAnchor="middle" dominantBaseline="middle" fill="white" fontSize={20} fontWeight={700}>
+                              {value}%
+                            </text>
+                          );
+                        }}
                       >
-                        {donutData.map((entry, index) => (
+                        {DEPARTMENT_DONUT_DISPLAY_DATA.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.fill} />
                         ))}
                       </Pie>
                       <Tooltip
-                        formatter={(value: number, _name: string, props: { payload: { count?: number } }) =>
-                          [`${value}%`, props.payload.count != null ? `Count: ${props.payload.count}` : ""]
+                        formatter={(value: number, _name: string, props: { payload: { name?: string } }) =>
+                          [`${value}%`, props.payload.name ?? ""]
                         }
                         contentStyle={{
                           borderRadius: "0.75rem",
@@ -330,20 +442,25 @@ export function AdminDashboard() {
                       />
                     </PieChart>
                   </ResponsiveContainer>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <p className="text-3xl font-bold text-[#111827]">{totalDocs}</p>
-                    <p className="text-sm text-gray-500">Total</p>
-                  </div>
                 </div>
-                <div className="flex-1 space-y-2 text-base">
-                  {donutData.map((d) => (
-                    <div key={d.name} className="flex items-center justify-between gap-2">
-                      <span className="text-[#111827]">{d.name}</span>
-                      <span className="font-semibold text-[#111827]">{d.value}%</span>
+                <div className="flex flex-col gap-[14px] min-w-0 w-full max-w-[320px] lg:max-w-[400px] ml-0 pl-0 lg:-ml-5">
+                  {DEPARTMENT_DONUT_DISPLAY_DATA.map((d) => (
+                    <div key={d.name} className="flex flex-col gap-[14px] p-3 rounded-lg hover:bg-gray-50/50 transition-colors">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="w-4 h-4 rounded-full flex-shrink-0" style={{ minWidth: 16, minHeight: 16, backgroundColor: d.fill }} />
+                        <span className="text-lg font-semibold text-[#111827] truncate" style={{ fontSize: 18, fontWeight: 600 }}>{d.name}</span>
+                        <span className="text-lg font-semibold text-gray-700 tabular-nums flex-shrink-0" style={{ fontSize: 18, fontWeight: 600 }}>{d.value}%</span>
+                      </div>
+                      <div className="h-2 rounded-lg bg-gray-100 overflow-hidden">
+                        <div
+                          className="h-full rounded-lg"
+                          style={{ width: `${Math.max(4, Math.min(100, d.value))}%`, backgroundColor: d.fill }}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
-              </div>
+              </>
             )}
           </div>
         </div>
@@ -408,20 +525,45 @@ export function AdminDashboard() {
           <h3 className="text-lg font-semibold text-[#111827] mb-4">Recent Activity</h3>
           {loading ? (
             <Skeleton className="h-48 w-full rounded-lg" />
+          ) : recentRequests.length === 0 ? (
+            <div className="flex items-center gap-3 text-gray-500 py-6">
+              <Activity className="w-5 h-5 text-gray-300 flex-shrink-0" />
+              <span className="text-sm">No recent activity.</span>
+            </div>
           ) : (
-            <ul className="space-y-3 text-sm">
-              <li className="flex items-center gap-3 text-gray-600">
-                <Activity className="w-4 h-4 text-[#7C3AED] flex-shrink-0" />
-                <span>Requests are routed to the right department based on content.</span>
-              </li>
-              {recentRequests.slice(0, 3).map((r) => (
-                <li key={r.id} className="flex items-center gap-3 text-gray-600">
-                  <Clock className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  <span>
-                    Request {r.id} — {r.status} · {new Date(r.created_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
-                  </span>
-                </li>
-              ))}
+            <ul className="space-y-0 divide-y divide-gray-100">
+              {recentRequests.slice(0, 5).map((r) => {
+                const deptName = departments.find((d) => d.id === r.department_id)?.name ?? r.department_id;
+                const statusClass = activityStatusStyles[r.status] ?? "bg-gray-100 text-gray-700 border-gray-200";
+                return (
+                  <li key={r.id}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/admin/requests/${r.id}`)}
+                      className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors text-left"
+                    >
+                      <div className="w-9 h-9 rounded-lg bg-[#7C3AED]/10 flex items-center justify-center flex-shrink-0">
+                        <FileText className="w-4 h-4 text-[#7C3AED]" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-mono text-sm font-medium text-[#111827] truncate">{r.id}</p>
+                        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium border ${statusClass}`}>
+                            {formatStatusForActivity(r.status)}
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+                            <MapPin className="w-3 h-3" />
+                            {deptName}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {new Date(r.created_at).toLocaleString(undefined, { timeStyle: "short", dateStyle: "short" })}
+                        </p>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
@@ -449,21 +591,20 @@ export function AdminDashboard() {
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: "Requests processed today", value: totalDocs, icon: ListTodo, color: "text-[#7C3AED]" },
-          { label: "Avg. response", value: "—", icon: Clock, color: "text-[#3B82F6]" },
-          { label: "Active agents", value: "—", icon: Users, color: "text-[#F59E0B]" },
-          { label: "System status", value: "OK", icon: Gauge, color: "text-[#10B981]" },
+          { label: "Requests Processed Today", value: loading ? "—" : String(requestsResolvedToday), icon: ListTodo, iconBg: "bg-[#7C3AED]/10", iconColor: "text-[#7C3AED]" },
+          { label: "Avg Response Time", value: loading ? "—" : avgResponseDisplay, icon: Clock, iconBg: "bg-[#3B82F6]/10", iconColor: "text-[#3B82F6]" },
+          { label: "Active Agents", value: loading ? "—" : String(agentsHandledToday), icon: Users, iconBg: "bg-[#F59E0B]/10", iconColor: "text-[#F59E0B]" },
+          { label: "Avg. Rating", value: feedbackSummary?.average_rating != null ? `${feedbackSummary.average_rating}/5` : "—", icon: Star, iconBg: "bg-amber-100", iconColor: "text-amber-600" },
+          { label: "System Status", value: systemStatusLabel, icon: Gauge, iconBg: queryError ? "bg-red-100" : "bg-[#10B981]/10", iconColor: queryError ? "text-red-600" : "text-[#10B981]" },
         ].map((item) => {
           const Icon = item.icon;
           return (
-            <div key={item.label} className="bg-white rounded-xl border border-[#E5E7EB] p-4 shadow-sm">
-              <div className="flex items-center gap-3">
-                <Icon className={`w-8 h-8 ${item.color}`} />
-                <div>
-                  <p className="text-xs text-gray-500">{item.label}</p>
-                  <p className="text-lg font-semibold text-[#111827]">{item.value}</p>
-                </div>
+            <div key={item.label} className="bg-white rounded-xl border border-[#E5E7EB] p-6 shadow-sm flex flex-col items-center text-center gap-3">
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${item.iconBg}`}>
+                <Icon className={`w-6 h-6 ${item.iconColor}`} />
               </div>
+              <p className="text-2xl md:text-3xl font-bold text-[#111827] tabular-nums">{item.value}</p>
+              <p className="text-sm text-gray-500 font-medium">{item.label}</p>
             </div>
           );
         })}

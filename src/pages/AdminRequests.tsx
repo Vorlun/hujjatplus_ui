@@ -1,18 +1,21 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/useAuth";
-import { fetchAllRequests, updateRequestStatus, type RequestListItem, type RequestStatus } from "../api/requests";
+import { fetchAllRequests, updateRequestStatus, deleteRequest, type RequestListItem, type RequestStatus } from "../api/requests";
 import { fetchDepartments } from "../api/departments";
 import { useNavigate } from "react-router";
 import {
   ListTodo,
   Search,
   Eye,
-  Pencil,
   MoreVertical,
   Loader2,
   FileSearch,
+  UserPlus,
+  CheckCircle,
+  Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { TableRowSkeleton } from "../components/ui/Skeleton";
 
 const statusConfig: Record<string, { label: string; className: string }> = {
@@ -53,6 +56,19 @@ export function AdminRequests() {
       queryClient.invalidateQueries({ queryKey: ["requests"] });
       queryClient.invalidateQueries({ queryKey: ["department-requests"] });
       queryClient.invalidateQueries({ queryKey: ["request"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteRequest(id),
+    onSuccess: () => {
+      setActionMenuId(null);
+      queryClient.invalidateQueries({ queryKey: ["requests"] });
+      queryClient.invalidateQueries({ queryKey: ["department-requests"] });
+      toast.success("Request deleted");
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not delete request");
     },
   });
 
@@ -204,6 +220,7 @@ export function AdminRequests() {
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Request ID</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Title</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Category</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">Intent</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Department</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Requester</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Priority</th>
@@ -214,7 +231,7 @@ export function AdminRequests() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {Array.from({ length: 5 }).map((_, i) => (
-                    <TableRowSkeleton key={i} cols={9} />
+                    <TableRowSkeleton key={i} cols={10} />
                   ))}
                 </tbody>
               </table>
@@ -233,6 +250,7 @@ export function AdminRequests() {
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Request ID</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Title</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Category</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">Intent</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Department</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Requester</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Priority</th>
@@ -254,6 +272,7 @@ export function AdminRequests() {
                         <td className="px-4 py-3 font-mono text-xs text-gray-600">{r.id}</td>
                         <td className="px-4 py-3 font-medium text-[#111827]">{r.title || "—"}</td>
                         <td className="px-4 py-3 text-gray-600 capitalize">{r.category || "—"}</td>
+                        <td className="px-4 py-3 text-gray-600 capitalize">{r.intent ?? "—"}</td>
                         <td className="px-4 py-3 text-gray-600">{getDeptName(r.department_id)}</td>
                         <td className="px-4 py-3 text-gray-600">{r.requester_name ?? r.requester_id ?? "—"}</td>
                         <td className="px-4 py-3">
@@ -280,40 +299,65 @@ export function AdminRequests() {
                           {new Date(r.created_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
                         </td>
                         <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-1">
+                          <div className="flex items-center justify-end gap-2">
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); navigate(`/admin/requests/${r.id}`); }}
-                              className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-[#111827]"
-                              title="View"
+                              className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-[#111827] transition-colors cursor-pointer"
+                              title="Open Request"
                             >
                               <Eye className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-[#111827]"
-                              title="Edit"
-                            >
-                              <Pencil className="w-4 h-4" />
                             </button>
                             <div className="relative">
                               <button
                                 type="button"
                                 onClick={() => setActionMenuId(actionMenuId === r.id ? null : r.id)}
-                                className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-[#111827]"
-                                title="More options"
+                                className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-[#111827] transition-colors cursor-pointer"
+                                title="More Actions"
                               >
                                 <MoreVertical className="w-4 h-4" />
                               </button>
                               {actionMenuId === r.id && (
                                 <>
                                   <div className="fixed inset-0 z-10" onClick={() => setActionMenuId(null)} aria-hidden />
-                                  <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-20">
-                                    <button type="button" onClick={() => { navigate(`/admin/requests/${r.id}`); setActionMenuId(null); }} className="w-full px-3 py-2 text-left text-sm text-[#111827] hover:bg-gray-50 flex items-center gap-2">
-                                      <Eye className="w-4 h-4" /> View
+                                  <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-20 min-w-[11rem]">
+                                    <button
+                                      type="button"
+                                      onClick={() => { navigate(`/admin/requests/${r.id}`); setActionMenuId(null); }}
+                                      className="w-full px-3 py-2 text-left text-sm text-[#111827] hover:bg-gray-50 flex items-center gap-2 rounded-t-lg"
+                                    >
+                                      <Eye className="w-4 h-4 flex-shrink-0" /> Open Request
                                     </button>
-                                    <button type="button" className="w-full px-3 py-2 text-left text-sm text-[#111827] hover:bg-gray-50 flex items-center gap-2">
-                                      <Pencil className="w-4 h-4" /> Edit
+                                    <button
+                                      type="button"
+                                      onClick={() => { navigate(`/admin/requests/${r.id}`); setActionMenuId(null); }}
+                                      className="w-full px-3 py-2 text-left text-sm text-[#111827] hover:bg-gray-50 flex items-center gap-2"
+                                    >
+                                      <UserPlus className="w-4 h-4 flex-shrink-0" /> Assign Agent
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        updateStatusMutation.mutate({ id: r.id, status: "resolved" });
+                                        setActionMenuId(null);
+                                      }}
+                                      disabled={r.status === "resolved" || updateStatusMutation.isPending}
+                                      className="w-full px-3 py-2 text-left text-sm text-[#111827] hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      <CheckCircle className="w-4 h-4 flex-shrink-0" /> Mark Resolved
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (window.confirm("Delete this request? This cannot be undone.")) {
+                                          deleteMutation.mutate(r.id);
+                                          setActionMenuId(null);
+                                        }
+                                      }}
+                                      disabled={deleteMutation.isPending}
+                                      className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 rounded-b-lg disabled:opacity-50"
+                                    >
+                                      <Trash2 className="w-4 h-4 flex-shrink-0" /> Delete Request
                                     </button>
                                   </div>
                                 </>

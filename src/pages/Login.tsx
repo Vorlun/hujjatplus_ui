@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router";
 import { useAuth } from "../auth/useAuth";
 
@@ -12,10 +12,11 @@ export function Login() {
   const location = useLocation();
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname ?? "/";
 
-  if (token) {
-    navigate(from, { replace: true });
-    return null;
-  }
+  useEffect(() => {
+    if (token) {
+      navigate(from, { replace: true });
+    }
+  }, [token, from, navigate]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,6 +30,10 @@ export function Login() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (token) {
+    return null;
   }
 
   return (

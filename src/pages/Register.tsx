@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router";
 import { register as apiRegister } from "../api/auth";
 import { useAuth } from "../auth/useAuth";
@@ -13,10 +13,11 @@ export function Register() {
   const { login, token } = useAuth();
   const navigate = useNavigate();
 
-  if (token) {
-    navigate("/", { replace: true });
-    return null;
-  }
+  useEffect(() => {
+    if (token) {
+      navigate("/", { replace: true });
+    }
+  }, [token, navigate]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -37,6 +38,10 @@ export function Register() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (token) {
+    return null;
   }
 
   return (

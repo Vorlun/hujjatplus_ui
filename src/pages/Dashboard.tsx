@@ -16,6 +16,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
+import { toast } from "sonner";
 import { useAuth } from "../auth/useAuth";
 import { fetchAllRequests, createRequest } from "../api/requests";
 import { fetchDepartments } from "../api/departments";
@@ -39,18 +40,33 @@ const priorityBadge: Record<string, string> = {
   Low: "bg-blue-100 text-blue-700 border-blue-200",
 };
 
-const timelineEvents = [
-  { icon: MessageSquare, label: "Request submitted", time: "Just now" },
-  { icon: Cpu, label: "AI classified request", time: "—" },
-  { icon: GitBranch, label: "Request routed to department", time: "—" },
-  { icon: UserCheck, label: "Agent started processing", time: "—" },
-  { icon: CheckCircle, label: "Request resolved", time: "—" },
+const timelineBase = [
+  { key: "submitted", icon: MessageSquare, label: "Request submitted" },
+  { key: "classified", icon: Cpu, label: "AI classified request" },
+  { key: "routed", icon: GitBranch, label: "Request routed to department" },
+  { key: "agent", icon: UserCheck, label: "Agent started processing" },
+  { key: "resolved", icon: CheckCircle, label: "Request resolved" },
 ];
 
 const helpfulDocs = [
-  { name: "HR policies", url: "#", icon: FileText },
-  { name: "Finance forms", url: "#", icon: FileText },
-  { name: "IT support guide", url: "#", icon: FileText },
+  {
+    title: "HR Policies",
+    description: "Company HR rules and employee guidelines",
+    file: "/documents/hr-policies.html",
+    icon: FileText,
+  },
+  {
+    title: "Finance Forms",
+    description: "Expense reports and reimbursement templates",
+    file: "/documents/finance-forms.html",
+    icon: FileText,
+  },
+  {
+    title: "IT Support Guide",
+    description: "Troubleshooting and internal IT help documentation",
+    file: "/documents/it-support-guide.html",
+    icon: FileText,
+  },
 ];
 
 export function Dashboard() {
@@ -98,6 +114,9 @@ export function Dashboard() {
       setLastResult({ department: String(dept), priority: data.priority });
       setQuickText("");
     },
+    onError: (err: Error) => {
+      toast.error(err?.message ?? "Failed to submit request. Please try again.");
+    },
   });
 
   const handleQuickSubmit = () => {
@@ -106,6 +125,47 @@ export function Dashboard() {
   };
 
   const recent = [...myRequests].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 8);
+  const activeRequest = recent[0] ?? myRequests[0] ?? null;
+
+  const activeDeptName = activeRequest ? getDeptName(activeRequest.department_id) : null;
+
+  const currentTimelineIndex = (() => {
+    if (!activeRequest) return -1;
+    switch (activeRequest.status) {
+      case "new":
+        return 0;
+      case "in_progress":
+        return 3;
+      case "resolved":
+      case "rejected":
+        return 4;
+      default:
+        return 0;
+    }
+  })();
+
+  const submittedAt = activeRequest ? new Date(activeRequest.created_at) : null;
+  const updatedAt = activeRequest?.updated_at ? new Date(activeRequest.updated_at) : null;
+
+  const timelineSteps = timelineBase.map((step, idx) => {
+    let at: Date | null = null;
+    if (!activeRequest) {
+      at = null;
+    } else if (step.key === "submitted") {
+      at = submittedAt;
+    } else if (step.key === "classified" || step.key === "routed") {
+      at = submittedAt;
+    } else if (step.key === "agent") {
+      if (activeRequest.status === "in_progress" || activeRequest.status === "resolved" || activeRequest.status === "rejected") {
+        at = updatedAt ?? submittedAt;
+      }
+    } else if (step.key === "resolved") {
+      if (activeRequest.status === "resolved" || activeRequest.status === "rejected") {
+        at = updatedAt ?? submittedAt;
+      }
+    }
+    return { ...step, idx, at };
+  });
 
   if (user?.role !== "user") {
     return null;
@@ -218,18 +278,52 @@ export function Dashboard() {
         {/* Request timeline */}
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-6">
           <h3 className="text-base font-semibold text-[#111827]">Request timeline</h3>
-          <p className="text-sm text-gray-500 mt-1">Typical request flow</p>
+          <p className="text-sm text-gray-500 mt-1">
+            {activeRequest ? "Latest request lifecycle" : "Typical request flow"}
+          </p>
           <div className="mt-4 space-y-0">
-            {timelineEvents.map((event, i) => {
-              const Icon = event.icon;
+            {timelineSteps.map((step) => {
+              const Icon = step.icon;
+              const isCurrent = currentTimelineIndex === step.idx && !!activeRequest;
+              const isComplete = currentTimelineIndex > step.idx && !!activeRequest && !!step.at;
+              const hasTime = !!step.at;
+              let statusText: string;
+
+              if (!activeRequest) {
+                statusText = "Waiting";
+              } else if (isComplete && hasTime) {
+                statusText = new Date(step.at as Date).toLocaleString(undefined, {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                });
+              } else if (isCurrent) {
+                statusText = "In progress";
+              } else if (hasTime) {
+                statusText = new Date(step.at as Date).toLocaleString(undefined, {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                });
+              } else {
+                statusText = "Waiting";
+              }
+
+              const label =
+                step.key === "routed" && activeDeptName
+                  ? `Request routed to ${activeDeptName} department`
+                  : step.label;
+
               return (
-                <div key={event.label} className="flex gap-3 py-3 border-b border-gray-100 last:border-0">
-                  <div className="w-8 h-8 rounded-lg bg-[#7C3AED]/10 flex items-center justify-center flex-shrink-0">
-                    <Icon className="w-4 h-4 text-[#7C3AED]" />
+                <div key={step.key} className="flex gap-3 py-3 border-b border-gray-100 last:border-0">
+                  <div
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                      isComplete || isCurrent ? "bg-[#7C3AED]/10 text-[#7C3AED]" : "bg-gray-100 text-gray-400"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-[#111827]">{event.label}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{event.time}</p>
+                    <p className="text-sm font-medium text-[#111827]">{label}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{statusText}</p>
                   </div>
                 </div>
               );
@@ -286,6 +380,7 @@ export function Dashboard() {
               <tr>
                 <th className="px-4 py-3 text-left font-medium text-gray-600">Request ID</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-600">Title</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">Intent</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-600">Department</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-600">Priority</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-600">Status</th>
@@ -294,11 +389,11 @@ export function Dashboard() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {isLoading
-                ? Array.from({ length: 5 }).map((_, i) => <TableRowSkeleton key={i} cols={6} />)
+                ? Array.from({ length: 5 }).map((_, i) => <TableRowSkeleton key={i} cols={7} />)
                 : recent.length === 0
                   ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-gray-500">
+                      <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
                         No requests yet. Create one using New Request or the quick request panel.
                       </td>
                     </tr>
@@ -311,6 +406,7 @@ export function Dashboard() {
                     >
                       <td className="px-4 py-3 font-mono text-xs text-gray-600">{r.id}</td>
                       <td className="px-4 py-3 font-medium text-[#111827]">{r.title || "—"}</td>
+                      <td className="px-4 py-3 text-gray-600 capitalize">{r.intent ?? "—"}</td>
                       <td className="px-4 py-3 text-gray-600">{getDeptName(r.department_id)}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium border ${priorityBadge[r.priority] ?? "bg-gray-100 text-gray-700"}`}>
@@ -341,13 +437,20 @@ export function Dashboard() {
             const Icon = doc.icon;
             return (
               <a
-                key={doc.name}
-                href={doc.url}
-                className="inline-flex items-center gap-2 px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 hover:border-[#7C3AED]/30 transition-colors text-sm font-medium text-[#111827]"
+                key={doc.title}
+                href={doc.file}
+                download
+                className="inline-flex flex-col items-start gap-1 px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 hover:border-[#7C3AED]/30 transition-colors text-sm text-[#111827]"
               >
-                <Icon className="w-4 h-4 text-[#7C3AED]" />
-                {doc.name}
-                <Download className="w-4 h-4 text-gray-400" />
+                <div className="flex items-center gap-2">
+                  <Icon className="w-4 h-4 text-[#7C3AED]" />
+                  <span className="font-medium">{doc.title}</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">{doc.description}</p>
+                <span className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-[#7C3AED]">
+                  <Download className="w-3 h-3" />
+                  Download
+                </span>
               </a>
             );
           })}

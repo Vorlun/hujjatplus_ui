@@ -16,6 +16,7 @@ import {
   Bell,
   HelpCircle,
   MessageCircleReply,
+  CalendarDays,
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router";
 import { useAuth } from "../auth/useAuth";
@@ -52,6 +53,7 @@ const adminMenuItems = [
 const agentMenuItems = [
   { path: "/department/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { path: "/inbox", label: "Inbox", icon: Inbox },
+   { path: "/department/calendar", label: "Calendar", icon: CalendarDays },
   { path: "/documents", label: "Documents", icon: FileText },
   { path: "/settings", label: "Settings", icon: Settings },
 ];

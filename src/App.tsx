@@ -27,6 +27,7 @@ import { HelpPage } from "./pages/HelpPage";
 import { DepartmentResponses } from "./pages/DepartmentResponses";
 import { DepartmentResponseDetail } from "./pages/DepartmentResponseDetail";
 import { DepartmentDashboard } from "./pages/DepartmentDashboard";
+import { DepartmentCalendar } from "./pages/DepartmentCalendar";
 
 const Dashboard = lazy(() => import("./pages/Dashboard").then((m) => ({ default: m.Dashboard })));
 const DepartmentInbox = lazy(() =>
@@ -124,6 +125,14 @@ export default function App() {
                 <Suspense fallback={<PageFallback />}>
                   <DepartmentInbox />
                 </Suspense>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="department/calendar"
+            element={
+              <ProtectedRoute allowedRoles={["agent", "admin"]}>
+                <DepartmentCalendar />
               </ProtectedRoute>
             }
           />

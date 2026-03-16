@@ -38,14 +38,20 @@ export function DepartmentResponseDetail() {
     return () => { cancelled = true; };
   }, [id]);
 
+  useEffect(() => {
+    if (!id) navigate("/department-responses");
+  }, [id, navigate]);
+
+  useEffect(() => {
+    if (loading || error || !request || !user) return;
+    const isOwner = request.requester_id === user.id;
+    if (user.role === "user" && !isOwner) navigate("/department-responses");
+  }, [loading, error, request, user, navigate]);
+
   const { data: departments = [] } = useQuery({ queryKey: ["departments"], queryFn: fetchDepartments });
   const getDeptName = (deptId: string) => departments.find((d) => d.id === deptId)?.name ?? deptId;
 
-  if (!id) {
-    navigate("/department-responses");
-    return null;
-  }
-
+  if (!id) return null;
   if (loading) return <div className="text-gray-500 p-6">Loading…</div>;
   if (error) {
     return (
@@ -60,10 +66,7 @@ export function DepartmentResponseDetail() {
   if (!request) return null;
 
   const isOwner = user?.id && request.requester_id === user.id;
-  if (!isOwner && user?.role === "user") {
-    navigate("/department-responses");
-    return null;
-  }
+  if (!isOwner && user?.role === "user") return null;
 
   const req = request as typeof request & { assigned_agent_name?: string; assigned_agent?: string; department_reply?: string };
   const agentName = req.assigned_agent_name ?? req.assigned_agent ?? "—";
