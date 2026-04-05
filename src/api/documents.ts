@@ -6,6 +6,8 @@ export interface DocumentItem {
   department_id: string;
   file_url: string;
   created_at?: string;
+  /** When the API provides size (bytes), the UI can display it */
+  file_size_bytes?: number;
 }
 
 export interface CreateDocumentBody {

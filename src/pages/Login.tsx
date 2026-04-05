@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router";
 import { useAuth } from "../auth/useAuth";
+import { Logo } from "../components/ui/Logo";
 
 export function Login() {
   const [email, setEmail] = useState("");
@@ -38,13 +39,12 @@ export function Login() {
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-[#FFFFFF] border border-[#E5E7EB] rounded-xl shadow-sm p-6">
-        <h1 className="text-xl font-semibold text-[#111827] mb-2">
-          Sign in
-        </h1>
-        <p className="text-sm text-[#6B7280] mb-6">
-          HujjatPlus AI Helpdesk
-        </p>
+      <div className="w-full max-w-sm bg-[#FFFFFF] border border-[#E5E7EB] rounded-xl shadow-sm p-6 dark:border-slate-700 dark:bg-slate-900">
+        <div className="mb-8 flex flex-col items-center text-center">
+          <Logo variant="full" size="xl" className="mb-6" />
+          <h1 className="text-xl font-semibold text-[#111827] dark:text-white">Sign in</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">AI Helpdesk</p>
+        </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
             <div className="text-sm text-[#DC2626] bg-[#FEE2E2] border border-[#FECACA] rounded-xl px-3 py-2">

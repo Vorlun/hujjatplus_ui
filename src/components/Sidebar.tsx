@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard,
   FileDown,
@@ -10,22 +11,28 @@ import {
   Search,
   BarChart3,
   Settings,
-  LogOut,
   FileText,
   Building2,
   Bell,
   HelpCircle,
   MessageCircleReply,
   CalendarDays,
+  ChevronsLeft,
 } from "lucide-react";
-import { NavLink, useNavigate } from "react-router";
+import { NavLink } from "react-router";
 import { useAuth } from "../auth/useAuth";
 import type { Role } from "../auth/useAuth";
+import clsx from "clsx";
+import { SidebarAccountMenu } from "./sidebar/SidebarAccountMenu";
+import { Logo } from "./ui/Logo";
 
 interface SidebarProps {
   isMobile?: boolean;
   open?: boolean;
   onClose?: () => void;
+  /** Desktop rail mode: icon-only nav */
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }
 
 /** User: Dashboard, AI Chat, My Requests, Responses, Settings, Help */
@@ -53,7 +60,7 @@ const adminMenuItems = [
 const agentMenuItems = [
   { path: "/department/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { path: "/inbox", label: "Inbox", icon: Inbox },
-   { path: "/department/calendar", label: "Calendar", icon: CalendarDays },
+  { path: "/department/calendar", label: "Calendar", icon: CalendarDays },
   { path: "/documents", label: "Documents", icon: FileText },
   { path: "/settings", label: "Settings", icon: Settings },
 ];
@@ -76,93 +83,180 @@ const allMenuItems = [
 ];
 
 function getMenuItems(role: Role) {
-  if (role === "admin") return adminMenuItems.map((item) => ({ ...item, path: item.path, label: item.label, icon: item.icon, roles: ["admin"] as Role[] }));
-  if (role === "user") return userMenuItems.map((item) => ({ ...item, path: item.path, label: item.label, icon: item.icon, roles: ["user"] as Role[] }));
-  if (role === "agent") return agentMenuItems.map((item) => ({ ...item, path: item.path, label: item.label, icon: item.icon, roles: ["agent"] as Role[] }));
+  if (role === "admin")
+    return adminMenuItems.map((item) => ({
+      ...item,
+      path: item.path,
+      label: item.label,
+      icon: item.icon,
+      roles: ["admin"] as Role[],
+    }));
+  if (role === "user")
+    return userMenuItems.map((item) => ({
+      ...item,
+      path: item.path,
+      label: item.label,
+      icon: item.icon,
+      roles: ["user"] as Role[],
+    }));
+  if (role === "agent")
+    return agentMenuItems.map((item) => ({
+      ...item,
+      path: item.path,
+      label: item.label,
+      icon: item.icon,
+      roles: ["agent"] as Role[],
+    }));
   return allMenuItems.filter((item) => item.roles.includes(role));
 }
 
-export function Sidebar({ isMobile = false, open = true, onClose }: SidebarProps) {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
+function SidebarNavItem({
+  to,
+  end,
+  icon: Icon,
+  label,
+  onNavigate,
+  collapsed,
+}: {
+  to: string;
+  end?: boolean;
+  icon: LucideIcon;
+  label: string;
+  onNavigate?: () => void;
+  collapsed?: boolean;
+}) {
+  return (
+    <li>
+      <NavLink
+        to={to}
+        end={end}
+        title={collapsed ? label : undefined}
+        aria-label={collapsed ? label : undefined}
+        onClick={onNavigate}
+        className={({ isActive }) =>
+          clsx(
+            "group relative flex w-full items-center gap-3 overflow-hidden rounded-xl py-2.5 text-sm font-semibold transition-all duration-200 ease-out",
+            collapsed ? "justify-center px-2" : "pl-3 pr-3",
+            isActive
+              ? clsx(
+                  "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-500/25 ring-1 ring-white/10",
+                  !collapsed && "pl-3.5"
+                )
+              : "text-slate-600 hover:bg-slate-100/90 hover:text-slate-900 hover:shadow-sm"
+          )
+        }
+      >
+        {({ isActive }) => (
+          <>
+            {isActive && !collapsed && (
+              <span
+                className="absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r-full bg-white shadow-sm"
+                aria-hidden
+              />
+            )}
+            <Icon
+              className={clsx(
+                "relative z-[1] h-[18px] w-[18px] shrink-0 transition-colors duration-200",
+                isActive ? "text-white" : "text-slate-400 group-hover:text-indigo-600"
+              )}
+            />
+            <span className={clsx("relative z-[1] truncate", collapsed && "sr-only")}>{label}</span>
+          </>
+        )}
+      </NavLink>
+    </li>
+  );
+}
+
+export function Sidebar({
+  isMobile = false,
+  open = true,
+  onClose,
+  collapsed = false,
+  onToggleCollapsed,
+}: SidebarProps) {
+  const { user } = useAuth();
 
   if (!user) return null;
 
   const items = getMenuItems(user.role);
 
-  const handleLogout = () => {
-    logout();
-    navigate("/login");
-  };
-
   const handleNav = () => {
     if (isMobile) onClose?.();
   };
 
+  const narrow = collapsed && !isMobile;
+
   return (
     <aside
-      className={`w-[260px] flex-shrink-0 h-screen flex flex-col fixed left-0 top-0 z-30 bg-[#FFFFFF] border-r border-[#E5E7EB] transition-transform duration-200 ease-out ${
+      className={clsx(
+        "fixed left-0 top-0 z-30 flex h-screen flex-shrink-0 flex-col border-r border-slate-200/90",
+        narrow ? "w-[72px]" : "w-[260px]",
+        "bg-gradient-to-b from-white via-white to-slate-50/90",
+        "transition-[transform,width] duration-200 ease-out",
         isMobile && !open ? "-translate-x-full" : "translate-x-0"
-      }`}
+      )}
     >
-      <div className="p-6 border-b border-[#E5E7EB]">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-[#7C3AED] flex items-center justify-center shadow-sm">
-            <FileText className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h2 className="text-[15px] font-semibold text-[#111827]">
-              HujjatPlus
-            </h2>
-            <p className="text-xs text-[#6B7280]">
-              AI Helpdesk
-            </p>
-          </div>
+      {/* Brand */}
+      {narrow ? (
+        <div className="flex items-center justify-center gap-2 border-b border-slate-200/80 px-3 py-4 dark:border-slate-700/80">
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            aria-label="Expand sidebar"
+            className="flex items-center justify-center rounded-xl p-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+          >
+            <Logo variant="icon" size="md" />
+          </button>
         </div>
-      </div>
+      ) : (
+        <div className="flex items-center gap-2 border-b border-slate-200/80 px-3 py-4 pb-6 dark:border-slate-700/80">
+          <div className="flex min-w-0 flex-1 items-center">
+            <Logo variant="full" size="xl" className="min-w-0" />
+          </div>
+          {!isMobile && onToggleCollapsed && (
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              aria-label="Collapse sidebar"
+              className="shrink-0 rounded-lg p-1.5 text-slate-400 transition-all duration-200 hover:bg-slate-100/90 dark:hover:bg-slate-800/80"
+            >
+              <ChevronsLeft className="h-4 w-4" aria-hidden />
+            </button>
+          )}
+        </div>
+      )}
 
-      <nav className="flex-1 p-4 overflow-y-auto">
-        <ul className="space-y-0.5">
+      {/* Nav */}
+      <nav className={clsx("flex-1 overflow-y-auto py-4", narrow ? "px-1.5" : "px-3")}>
+        <ul className="space-y-1">
           {items.map((item) => {
             const Icon = item.icon;
-            const path = item.path === "/dashboard" && user.role === "admin" ? "/admin" : item.path;
-            const end = path === "/dashboard" || path === "/admin" || path === "/department/dashboard";
+            const path =
+              item.path === "/dashboard" && user.role === "admin" ? "/admin" : item.path;
+            const end =
+              path === "/dashboard" || path === "/admin" || path === "/department/dashboard";
             return (
-              <li key={path + item.label}>
-                <NavLink
-                  to={path}
-                  onClick={handleNav}
-                  className={({ isActive }) =>
-                    `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-                      isActive ? "bg-[#7C3AED] text-white shadow-sm" : "text-[#111827] hover:bg-[#F3F4F6]"
-                    }`
-                  }
-                  end={end}
-                >
-                  <Icon className="w-4 h-4 flex-shrink-0" />
-                  <span>{item.label}</span>
-                </NavLink>
-              </li>
+              <SidebarNavItem
+                key={path + item.label}
+                to={path}
+                end={end}
+                icon={Icon}
+                label={item.label}
+                onNavigate={handleNav}
+                collapsed={narrow}
+              />
             );
           })}
         </ul>
       </nav>
 
-      <div className="p-4 border-t border-[#E5E7EB]">
-        <div className="text-xs text-[#6B7280] mb-1 truncate px-2">
-          {user.email}
-        </div>
-        <div className="text-xs text-[#6B7280] mb-2 px-2 capitalize">
-          {user.role}
-        </div>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-[#111827] hover:bg-[#F3F4F6] transition-colors"
-        >
-          <LogOut className="w-4 h-4" />
-          <span>Log out</span>
-        </button>
+      {/* Account */}
+      <div className="border-t border-slate-200/80 bg-gradient-to-t from-slate-50/80 to-transparent pb-2">
+        <SidebarAccountMenu
+          collapsed={narrow}
+          onNavigate={isMobile ? onClose : undefined}
+        />
       </div>
     </aside>
   );

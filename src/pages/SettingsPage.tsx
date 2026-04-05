@@ -1,22 +1,79 @@
 import { useState, useEffect } from "react";
-import { Settings, User, Shield, Bell, Moon, Sun } from "lucide-react";
+import { toast } from "sonner";
 import { useAuth } from "../auth/useAuth";
+import { SettingsSidebar, type SettingsSectionId } from "../components/settings/SettingsSidebar";
+import {
+  SettingsSectionContent,
+  type SettingsThemeChoice,
+} from "../components/settings/SettingsPanels";
+import { Logo } from "../components/ui/Logo";
 
 const STORAGE_NAME = "profile_display_name";
+const STORAGE_AVATAR = "settings_avatar_data_url";
+const STORAGE_LAST_PW = "settings_password_changed_at";
+const STORAGE_NOTIF = "settings_notifications_v1";
+const STORAGE_PREF = "settings_preferences_v1";
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return { ...fallback, ...JSON.parse(raw) };
+  } catch {
+    return fallback;
+  }
+}
+
+function applyRootTheme(t: SettingsThemeChoice) {
+  const root = document.documentElement;
+  if (t === "dark") {
+    root.classList.add("dark");
+  } else if (t === "light") {
+    root.classList.remove("dark");
+  } else {
+    root.classList.toggle("dark", window.matchMedia("(prefers-color-scheme: dark)").matches);
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 export function SettingsPage() {
   const { user } = useAuth();
+  const [section, setSection] = useState<SettingsSectionId>("profile");
+
+  const prefs = readJson(STORAGE_PREF, {
+    theme: "light" as SettingsThemeChoice,
+    language: "en",
+    density: "comfortable" as "comfortable" | "compact",
+  });
+  const notif = readJson(STORAGE_NOTIF, {
+    emailNotif: true,
+    systemNotif: true,
+    requestUpdates: true,
+  });
+
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
+  const [avatarDataUrl, setAvatarDataUrl] = useState<string | null>(null);
+
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [language, setLanguage] = useState("en");
-  const [density, setDensity] = useState<"comfortable" | "compact">("comfortable");
-  const [emailNotif, setEmailNotif] = useState(true);
-  const [systemNotif, setSystemNotif] = useState(true);
-  const [requestUpdates, setRequestUpdates] = useState(true);
+  const [lastPwChange, setLastPwChange] = useState<string | null>(null);
+
+  const [theme, setTheme] = useState<SettingsThemeChoice>(prefs.theme ?? "light");
+  const [language, setLanguage] = useState(prefs.language ?? "en");
+  const [density, setDensity] = useState<"comfortable" | "compact">(prefs.density ?? "comfortable");
+
+  const [emailNotif, setEmailNotif] = useState(notif.emailNotif);
+  const [systemNotif, setSystemNotif] = useState(notif.systemNotif);
+  const [requestUpdates, setRequestUpdates] = useState(notif.requestUpdates);
+
+  const [accountSaving, setAccountSaving] = useState(false);
+  const [securitySaving, setSecuritySaving] = useState(false);
+  const [prefSaving, setPrefSaving] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_NAME);
@@ -25,229 +82,170 @@ export function SettingsPage() {
     setEmail(user?.email ?? "");
   }, [user?.email]);
 
-  const initials = fullName.trim().split(/\s+/).map((s) => s[0]).join("").toUpperCase().slice(0, 2) || (user?.email?.slice(0, 2).toUpperCase() ?? "U");
+  useEffect(() => {
+    setLastPwChange(localStorage.getItem(STORAGE_LAST_PW));
+    const av = localStorage.getItem(STORAGE_AVATAR);
+    if (av) setAvatarDataUrl(av);
+    document.documentElement.dataset.density = density;
+    document.documentElement.lang = language;
+  }, []);
 
-  const handleSaveAccount = () => {
+  useEffect(() => {
+    applyRootTheme(theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (theme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => applyRootTheme("system");
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, [theme]);
+
+  const lastChangedLabel = lastPwChange
+    ? new Date(lastPwChange).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+    : "Never";
+
+  async function handleSaveAccount() {
+    setAccountSaving(true);
+    await delay(450);
     if (fullName.trim()) localStorage.setItem(STORAGE_NAME, fullName.trim());
-  };
+    setAccountSaving(false);
+    toast.success("Account saved", { description: "Your profile details were updated." });
+  }
+
+  function handleAvatarFile(file: File) {
+    if (file.size > 120_000) {
+      toast.error("Image too large", { description: "Please choose an image under 120 KB." });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const data = reader.result as string;
+      setAvatarDataUrl(data);
+      localStorage.setItem(STORAGE_AVATAR, data);
+      toast.success("Avatar updated");
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function handleUpdatePassword() {
+    if (!currentPassword) {
+      toast.error("Enter your current password");
+      return;
+    }
+    if (newPassword.length < 8) {
+      toast.error("Password too short", { description: "Use at least 8 characters." });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("Passwords do not match");
+      return;
+    }
+    setSecuritySaving(true);
+    await delay(600);
+    const iso = new Date().toISOString();
+    localStorage.setItem(STORAGE_LAST_PW, iso);
+    setLastPwChange(iso);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setSecuritySaving(false);
+    toast.success("Password updated", { description: "Your password change has been recorded." });
+  }
+
+  function handleSaveNotifications() {
+    localStorage.setItem(
+      STORAGE_NOTIF,
+      JSON.stringify({ emailNotif, systemNotif, requestUpdates })
+    );
+    toast.success("Notification settings saved");
+  }
+
+  async function handleSavePreferences() {
+    setPrefSaving(true);
+    await delay(400);
+    localStorage.setItem(STORAGE_PREF, JSON.stringify({ theme, language, density }));
+    document.documentElement.dataset.density = density;
+    document.documentElement.lang = language;
+    setPrefSaving(false);
+    toast.success("Preferences saved");
+  }
 
   return (
-    <div className="max-w-2xl space-y-6">
-      {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-semibold text-[#111827] flex items-center gap-2">
-          <Settings className="w-6 h-6 text-[#7C3AED]" />
-          Profile Settings
-        </h1>
-        <p className="text-sm text-gray-500 mt-1">Manage your account information and preferences.</p>
-      </div>
-
-      {/* Profile summary card */}
-      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-6">
-        <div className="flex items-center gap-4">
-          <div className="w-16 h-16 rounded-full bg-[#7C3AED] flex items-center justify-center text-white text-xl font-semibold flex-shrink-0">
-            {initials}
-          </div>
-          <div className="min-w-0">
-            <p className="text-lg font-semibold text-[#111827]">{fullName || "User"}</p>
-            <p className="text-sm text-gray-500 capitalize">{user?.role ?? "—"}</p>
-            <a href={`mailto:${user?.email}`} className="text-sm text-[#7C3AED] hover:underline truncate block">
-              {user?.email}
-            </a>
-          </div>
-        </div>
-      </div>
-
-      {/* Section 1: Account Information */}
-      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-6">
-        <h2 className="text-base font-semibold text-[#111827] mb-4 flex items-center gap-2">
-          <User className="w-5 h-5 text-[#7C3AED]" />
-          Account Information
-        </h2>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-gray-500 mb-1">Name</label>
-            <input
-              type="text"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#7C3AED] focus:border-transparent"
-              placeholder="Your name"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-500 mb-1">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-[#111827] focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              placeholder="you@example.com"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-500 mb-1">Role</label>
-            <input
-              type="text"
-              value={user?.role ?? ""}
-              readOnly
-              className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600 cursor-not-allowed capitalize"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={handleSaveAccount}
-            className="px-4 py-2 rounded-md bg-[#7C3AED] text-white text-sm font-medium hover:bg-[#6D28D9] focus:outline-none focus:ring-2 focus:ring-[#7C3AED] focus:ring-offset-2"
-          >
-            Save Changes
-          </button>
-        </div>
-      </div>
-
-      {/* Section 2: Security */}
-      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-6">
-        <h2 className="text-base font-semibold text-[#111827] mb-4 flex items-center gap-2">
-          <Shield className="w-5 h-5 text-[#7C3AED]" />
-          Security
-        </h2>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-gray-500 mb-1">Current Password</label>
-            <input
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-[#111827] focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              placeholder="••••••••"
-            />
-            <p className="text-xs text-gray-400 mt-1">Enter your current password to verify your identity.</p>
-          </div>
-          <div>
-            <label className="block text-sm text-gray-500 mb-1">New Password</label>
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-[#111827] focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              placeholder="••••••••"
-            />
-            <p className="text-xs text-gray-400 mt-1">Use at least 8 characters with a mix of letters and numbers.</p>
-          </div>
-          <div>
-            <label className="block text-sm text-gray-500 mb-1">Confirm Password</label>
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-[#111827] focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              placeholder="••••••••"
-            />
-            <p className="text-xs text-gray-400 mt-1">Re-enter your new password to confirm.</p>
-          </div>
-          <button
-            type="button"
-            className="px-4 py-2 rounded-md bg-[#7C3AED] text-white text-sm font-medium hover:bg-[#6D28D9] focus:outline-none focus:ring-2 focus:ring-[#7C3AED] focus:ring-offset-2"
-          >
-            Update Password
-          </button>
-        </div>
-      </div>
-
-      {/* Section 3: Notification Preferences */}
-      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-6">
-        <h2 className="text-base font-semibold text-[#111827] mb-4 flex items-center gap-2">
-          <Bell className="w-5 h-5 text-[#7C3AED]" />
-          Notification Preferences
-        </h2>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between py-2">
-            <label className="text-sm text-gray-700">Email Notifications</label>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={emailNotif}
-              onClick={() => setEmailNotif((v) => !v)}
-              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 ${emailNotif ? "bg-[#7C3AED]" : "bg-gray-200"}`}
-            >
-              <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform ${emailNotif ? "translate-x-5" : "translate-x-1"}`} />
-            </button>
-          </div>
-          <div className="flex items-center justify-between py-2">
-            <label className="text-sm text-gray-700">System Notifications</label>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={systemNotif}
-              onClick={() => setSystemNotif((v) => !v)}
-              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 ${systemNotif ? "bg-[#7C3AED]" : "bg-gray-200"}`}
-            >
-              <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform ${systemNotif ? "translate-x-5" : "translate-x-1"}`} />
-            </button>
-          </div>
-          <div className="flex items-center justify-between py-2">
-            <label className="text-sm text-gray-700">Request Updates</label>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={requestUpdates}
-              onClick={() => setRequestUpdates((v) => !v)}
-              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 ${requestUpdates ? "bg-[#7C3AED]" : "bg-gray-200"}`}
-            >
-              <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform ${requestUpdates ? "translate-x-5" : "translate-x-1"}`} />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Section 4: Interface Preferences */}
-      <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-6">
-        <h2 className="text-base font-semibold text-[#111827] mb-4 flex items-center gap-2">
-          <Moon className="w-5 h-5 text-[#7C3AED]" />
-          Interface Preferences
-        </h2>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-gray-500 mb-2">Theme</label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setTheme("light")}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium border transition-colors ${theme === "light" ? "bg-[#7C3AED] text-white border-[#7C3AED]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
-              >
-                <Sun className="w-4 h-4" /> Light
-              </button>
-              <button
-                type="button"
-                onClick={() => setTheme("dark")}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium border transition-colors ${theme === "dark" ? "bg-[#7C3AED] text-white border-[#7C3AED]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
-              >
-                <Moon className="w-4 h-4" /> Dark
-              </button>
+    <div className="min-h-[calc(100vh-6rem)] bg-[#F8FAFC] -mx-4 -mt-4 px-4 pb-12 pt-4 md:-mx-6 md:px-6 md:pb-16 md:pt-6">
+      <div className="mx-auto max-w-5xl">
+        <header className="mb-8 animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none">
+          <div className="flex items-start gap-3">
+            <Logo variant="icon" size="lg" className="shrink-0" />
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-3xl">
+                Profile settings
+              </h1>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Manage your account information and preferences.
+              </p>
             </div>
           </div>
-          <div>
-            <label className="block text-sm text-gray-500 mb-1">Language</label>
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-[#111827] focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-            >
-              <option value="en">English</option>
-              <option value="uz">O‘zbek</option>
-              <option value="ru">Русский</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm text-gray-500 mb-1">Dashboard density</label>
-            <select
-              value={density}
-              onChange={(e) => setDensity(e.target.value as "comfortable" | "compact")}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-[#111827] focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-            >
-              <option value="comfortable">Comfortable</option>
-              <option value="compact">Compact</option>
-            </select>
-          </div>
+        </header>
+
+        <div className="flex flex-col gap-8 md:flex-row md:items-start md:gap-10">
+          <aside className="shrink-0 md:w-56 md:pt-1">
+            <SettingsSidebar active={section} onSelect={setSection} />
+          </aside>
+
+          <main className="min-w-0 flex-1 pb-10">
+            <SettingsSectionContent
+              section={section}
+              profile={{
+                fullName,
+                email,
+                user,
+                avatarDataUrl,
+                onAvatarFile: handleAvatarFile,
+                onGoAccount: () => setSection("account"),
+              }}
+              account={{
+                fullName,
+                setFullName,
+                email,
+                setEmail,
+                role: user?.role ?? "",
+                saving: accountSaving,
+                onSave: handleSaveAccount,
+              }}
+              security={{
+                currentPassword,
+                setCurrentPassword,
+                newPassword,
+                setNewPassword,
+                confirmPassword,
+                setConfirmPassword,
+                lastChangedLabel,
+                saving: securitySaving,
+                onUpdatePassword: handleUpdatePassword,
+              }}
+              notifications={{
+                emailNotif,
+                setEmailNotif,
+                systemNotif,
+                setSystemNotif,
+                requestUpdates,
+                setRequestUpdates,
+                onSave: handleSaveNotifications,
+              }}
+              preferences={{
+                theme,
+                setTheme,
+                language,
+                setLanguage,
+                density,
+                setDensity,
+                saving: prefSaving,
+                onSave: handleSavePreferences,
+              }}
+            />
+          </main>
         </div>
       </div>
     </div>

@@ -1,23 +1,36 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Calendar, momentLocalizer } from "react-big-calendar";
-import moment from "moment";
+import { Loader2 } from "lucide-react";
 import { useAuth } from "../auth/useAuth";
 import { apiClient } from "../services/apiClient";
+import { CalendarHeader } from "../components/department-calendar/CalendarHeader";
+import { CalendarGrid } from "../components/department-calendar/CalendarGrid";
+import {
+  getVisibleDays,
+  headerTitle,
+  navigateDate,
+  dayKey,
+  calendarTransitionKey,
+} from "../components/department-calendar/calendarDates";
+import type { CalendarRequestEvent, CalendarViewMode } from "../components/department-calendar/types";
 
-const localizer = momentLocalizer(moment);
-
-interface CalendarRequestEvent {
-  id: string;
-  title: string;
-  department: string;
-  priority: string;
-  deadline: string;
-  status: string;
+function groupEventsByDay(events: CalendarRequestEvent[]): Record<string, CalendarRequestEvent[]> {
+  const map: Record<string, CalendarRequestEvent[]> = {};
+  for (const e of events) {
+    const k = dayKey(new Date(e.deadline));
+    if (!map[k]) map[k] = [];
+    map[k].push(e);
+  }
+  for (const k of Object.keys(map)) {
+    map[k].sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+  }
+  return map;
 }
 
 export function DepartmentCalendar() {
   const { user } = useAuth();
+  const [anchorDate, setAnchorDate] = useState(() => new Date());
+  const [view, setView] = useState<CalendarViewMode>("month");
 
   const { data: eventsRaw = [], isLoading, error } = useQuery({
     queryKey: ["requests-calendar"],
@@ -25,22 +38,15 @@ export function DepartmentCalendar() {
     enabled: !!user && (user.role === "agent" || user.role === "admin"),
   });
 
-  const events = useMemo(
-    () =>
-      eventsRaw
-        .filter((e) => e.deadline)
-        .map((e) => {
-          const start = new Date(e.deadline);
-          const end = new Date(e.deadline);
-          return {
-            ...e,
-            start,
-            end,
-            title: `${e.id} – ${e.title}`,
-          };
-        }),
-    [eventsRaw]
+  const events = useMemo(() => eventsRaw.filter((e) => e.deadline), [eventsRaw]);
+  const eventsByDay = useMemo(() => groupEventsByDay(events), [events]);
+  const visibleDays = useMemo(() => getVisibleDays(anchorDate, view), [anchorDate, view]);
+  const title = useMemo(() => headerTitle(anchorDate, view), [anchorDate, view]);
+  const gridTransitionKey = useMemo(
+    () => calendarTransitionKey(view, anchorDate),
+    [view, anchorDate]
   );
+  const today = new Date();
 
   if (!user || (user.role !== "agent" && user.role !== "admin")) {
     return <div className="text-[#6B7280] px-4 py-6">Access denied. Agent or Admin only.</div>;
@@ -55,43 +61,32 @@ export function DepartmentCalendar() {
   }
 
   return (
-    <div className="p-4">
-      <h1 className="text-2xl font-semibold text-[#111827] mb-4">Department Calendar</h1>
-      {isLoading ? (
-        <div className="text-[#6B7280]">Loading deadlines…</div>
-      ) : (
-        <div className="h-[600px] bg-white border border-[#E5E7EB] rounded-xl shadow-sm p-4">
-          <Calendar
-            localizer={localizer}
-            events={events}
-            startAccessor="start"
-            endAccessor="end"
-            style={{ height: "100%" }}
-            eventPropGetter={(event: CalendarRequestEvent & { start: Date; end: Date }) => {
-              const now = new Date();
-              const deadline = new Date(event.deadline);
-              const remainingMs = deadline.getTime() - now.getTime();
-              let backgroundColor = "#10B981"; // on_time
-              if (remainingMs <= 0) {
-                backgroundColor = "#EF4444"; // overdue red
-              } else if (remainingMs <= 2 * 60 * 60 * 1000) {
-                backgroundColor = "#F59E0B"; // warning yellow
-              }
-              return {
-                style: {
-                  backgroundColor,
-                  borderRadius: "8px",
-                  border: "none",
-                  color: "#ffffff",
-                  padding: "2px 6px",
-                  fontSize: "0.75rem",
-                },
-              };
-            }}
+    <div className="min-h-0 min-w-0 space-y-6 bg-[#F8FAFC] p-4 sm:p-6 md:p-8">
+      <CalendarHeader
+        title={title}
+        view={view}
+        onViewChange={setView}
+        onPrev={() => setAnchorDate((d) => navigateDate(d, view, -1))}
+        onNext={() => setAnchorDate((d) => navigateDate(d, view, 1))}
+      />
+
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm shadow-slate-200/40 sm:p-5 md:p-6">
+        {isLoading ? (
+          <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 text-slate-500">
+            <Loader2 className="h-8 w-8 animate-spin text-[#2563EB]" aria-hidden />
+            <p className="text-sm font-medium">Loading deadlines…</p>
+          </div>
+        ) : (
+          <CalendarGrid
+            days={visibleDays}
+            eventsByDay={eventsByDay}
+            view={view}
+            anchorDate={anchorDate}
+            today={today}
+            transitionKey={gridTransitionKey}
           />
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
-

@@ -4,8 +4,8 @@ import {
   Inbox,
   Search,
   MessageSquare,
-  FileEdit,
 } from "lucide-react";
+import { Logo } from "../../components/ui/Logo";
 
 interface SidebarProps {
   activeItem: string;
@@ -24,21 +24,8 @@ export function Sidebar({ activeItem, onItemClick }: SidebarProps) {
   return (
     <aside className="w-64 bg-sidebar border-r border-sidebar-border h-screen flex flex-col fixed left-0 top-0">
       {/* Logo */}
-      <div className="p-6 border-b border-sidebar-border">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-purple-600 to-purple-800 flex items-center justify-center">
-            <FileEdit className="w-5 h-5 text-white" />
-          </div>
-
-          <div>
-            <h2 className="text-[15px] font-semibold text-sidebar-foreground">
-              HujjatPlus
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              Hujjat boshqaruv tizimi
-            </p>
-          </div>
-        </div>
+      <div className="flex items-center gap-2 border-b border-sidebar-border px-3 py-4 pb-6">
+        <Logo variant="full" size="xl" className="min-w-0" />
       </div>
 
       {/* Navigation */}

@@ -1,20 +1,24 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/useAuth";
 import {
   fetchDepartmentRequests,
   updateRequestStatus,
-  type RequestListItem,
+  type RequestPriority,
   type RequestStatus,
 } from "../api/requests";
-import { StatusBadge } from "../components/StatusBadge";
-import { PriorityBadge } from "../components/PriorityBadge";
-import { Inbox, Search, Filter, FileText, Cpu, GitBranch, Clock, Loader2, MessageSquare } from "lucide-react";
-import { TableRowSkeleton } from "../components/ui/Skeleton";
-import { fetchMessages, sendMessage, type MessagePayload } from "../api/messages";
-import { useQuery as useRQQuery } from "@tanstack/react-query";
-
-const statusOptions: RequestStatus[] = ["new", "in_progress", "resolved", "rejected"];
+import { fetchMessages, sendMessage } from "../api/messages";
+import { Inbox, Sparkles } from "lucide-react";
+import { FiltersBar } from "../components/department-inbox/FiltersBar";
+import { InboxTable } from "../components/department-inbox/InboxTable";
+import { RequestDetailPanel } from "../components/department-inbox/RequestDetailPanel";
+import {
+  buildCandidateAgents,
+  getDisplayAssignment,
+  type AgentOption,
+  type AssignmentOverrides,
+} from "../components/department-inbox/assignmentUtils";
 
 export function DepartmentInbox() {
   const { user } = useAuth();
@@ -22,8 +26,12 @@ export function DepartmentInbox() {
   const departmentId = user?.department_id ?? "";
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | RequestStatus>("all");
+  const [priorityFilter, setPriorityFilter] = useState<"all" | RequestPriority>("all");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [response, setResponse] = useState("");
+  const [assignOverrides, setAssignOverrides] = useState<AssignmentOverrides>({});
 
   const { data: requests = [], isLoading, error } = useQuery({
     queryKey: ["department-requests", departmentId],
@@ -32,30 +40,56 @@ export function DepartmentInbox() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: RequestStatus }) =>
-      updateRequestStatus(id, status),
+    mutationFn: ({ id, status }: { id: string; status: RequestStatus }) => updateRequestStatus(id, status),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["department-requests", departmentId] });
     },
   });
 
-  const filtered = requests.filter((r) => {
-    const matchSearch =
-      !search ||
-      r.title.toLowerCase().includes(search.toLowerCase()) ||
-      r.id.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === "all" || r.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
+  const candidateAgents = useMemo(() => {
+    const base = buildCandidateAgents(requests, user ? { id: user.id, email: user.email } : null);
+    const seen = new Set(base.map((a) => a.id));
+    for (const a of Object.values(assignOverrides)) {
+      if (a && !seen.has(a.id)) {
+        seen.add(a.id);
+        base.push(a);
+      }
+    }
+    return base;
+  }, [requests, user, assignOverrides]);
 
-  const selected = selectedId ? requests.find((r) => r.id === selectedId) : null;
-  const [response, setResponse] = useState("");
+  useEffect(() => {
+    if (selectedId && !requests.some((r) => r.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [requests, selectedId]);
+
+  const filtered = useMemo(() => {
+    let list = requests.filter((r) => {
+      const matchSearch =
+        !search ||
+        r.title.toLowerCase().includes(search.toLowerCase()) ||
+        r.id.toLowerCase().includes(search.toLowerCase());
+      const matchStatus = statusFilter === "all" || r.status === statusFilter;
+      const matchPriority = priorityFilter === "all" || r.priority === priorityFilter;
+      return matchSearch && matchStatus && matchPriority;
+    });
+    list = [...list].sort((a, b) => {
+      const ta = new Date(a.created_at).getTime();
+      const tb = new Date(b.created_at).getTime();
+      return sortOrder === "desc" ? tb - ta : ta - tb;
+    });
+    return list;
+  }, [requests, search, statusFilter, priorityFilter, sortOrder]);
+
+  const selected = selectedId ? requests.find((r) => r.id === selectedId) ?? null : null;
+  const selectedAssignee = selected ? getDisplayAssignment(selected, assignOverrides) : null;
 
   const {
     data: messages = [],
     refetch: refetchMessages,
     isLoading: loadingMessages,
-  } = useRQQuery({
+  } = useQuery({
     queryKey: ["dept-messages", selected?.id],
     queryFn: () => fetchMessages(selected!.id),
     enabled: !!selected?.id,
@@ -71,271 +105,106 @@ export function DepartmentInbox() {
 
   function handleStatusChange(requestId: string, status: RequestStatus) {
     updateMutation.mutate({ id: requestId, status });
-    if (selectedId === requestId) setSelectedId(null);
   }
 
+  function handleAssign(agent: AgentOption | null) {
+    if (!selectedId) return;
+    setAssignOverrides((prev) => ({ ...prev, [selectedId]: agent }));
+  }
+
+  const totalCount = requests.length;
+  const highPriorityCount = useMemo(
+    () => requests.filter((r) => r.priority === "High").length,
+    [requests]
+  );
+
   if (user?.role !== "agent" && user?.role !== "admin") {
-    return (
-      <div className="text-[#6B7280]">Access denied. Agent or Admin only.</div>
-    );
+    return <div className="text-slate-500">Access denied. Agent or Admin only.</div>;
   }
 
   if (!departmentId && user?.role === "agent") {
-    return (
-      <div className="text-[#6B7280]">No department assigned.</div>
-    );
+    return <div className="text-slate-500">No department assigned.</div>;
   }
 
   return (
-    <div className="flex gap-6">
-      <div className={`flex-1 flex flex-col min-w-0 ${selected ? "max-w-[58%]" : ""}`}>
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-[#111827] flex items-center gap-2">
-            <Inbox className="w-6 h-6 text-[#7C3AED]" />
-            Department Inbox
-          </h1>
-          <p className="text-sm text-[#6B7280] mt-1">
-            Incoming requests for your department
-          </p>
-        </div>
+    <Tooltip.Provider delayDuration={280}>
+      <div className="min-h-full bg-[#F8FAFC] -mx-4 -mt-4 px-4 pb-10 pt-4 md:-mx-6 md:px-6 md:pb-12 md:pt-6">
+        <div className="mx-auto max-w-[1600px] space-y-6">
+          <header className="animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#2563EB]/10 text-[#2563EB]">
+                  <Inbox className="h-5 w-5" aria-hidden />
+                </span>
+                <div>
+                  <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+                    Department Inbox
+                  </h1>
+                  <p className="mt-1 text-sm text-slate-500">Incoming requests for your department</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <div className="inline-flex items-center gap-2 rounded-full border border-slate-200/90 bg-white px-4 py-2 text-sm shadow-sm">
+                  <Sparkles className="h-4 w-4 text-amber-500" aria-hidden />
+                  <span className="font-semibold text-slate-900 tabular-nums">{totalCount}</span>
+                  <span className="text-slate-500">total</span>
+                </div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-red-100 bg-red-50 px-4 py-2 text-sm shadow-sm">
+                  <span className="font-semibold text-red-700 tabular-nums">{highPriorityCount}</span>
+                  <span className="text-red-600/80">high priority</span>
+                </div>
+              </div>
+            </div>
+          </header>
 
-        <div className="flex gap-4 mb-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B7280]" />
-            <input
-              type="text"
-              placeholder="Search..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm text-[#111827] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/20"
-            />
-          </div>
-          <div className="relative">
-            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B7280]" />
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="pl-10 pr-8 py-2 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/20"
-            >
-              <option value="all">All status</option>
-              {statusOptions.map((s) => (
-                <option key={s} value={s}>
-                  {s.replace("_", " ")}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {error && (
-          <div className="mb-4 text-sm text-[#DC2626] bg-[#FEE2E2] border border-[#FECACA] rounded-xl px-4 py-2">
-            {String(error)}
-          </div>
-        )}
-
-        <div className="bg-[#FFFFFF] rounded-xl border border-[#E5E7EB] shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-500">Request ID</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-500">Title</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-500">Priority</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-500">Created time</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-500">Assigned Agent</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {isLoading
-                  ? Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={6} />)
-                  : filtered.map((r) => (
-                    <tr
-                      key={r.id}
-                      onClick={() => setSelectedId(r.id)}
-                      className={`hover:bg-gray-50 cursor-pointer transition-colors ${
-                        selectedId === r.id ? "bg-[#F5F3FF]" : ""
-                      }`}
-                    >
-                      <td className="px-4 py-3 font-mono text-xs text-[#111827]">{r.id}</td>
-                      <td className="px-4 py-3 font-medium text-[#111827]">{r.title}</td>
-                      <td className="px-4 py-3">
-                        <PriorityBadge priority={r.priority} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={r.status} />
-                      </td>
-                      <td className="px-4 py-3 text-gray-600">
-                        {new Date(r.created_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
-                      </td>
-                      <td className="px-4 py-3 text-gray-600">—</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-          {!isLoading && filtered.length === 0 && (
-            <div className="p-12 text-center text-[#6B7280]">No requests</div>
+          {error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {String(error)}
+            </div>
           )}
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-10 lg:items-start lg:gap-8">
+            <div className="space-y-4 lg:col-span-7">
+              <FiltersBar
+                search={search}
+                onSearchChange={setSearch}
+                statusFilter={statusFilter}
+                onStatusFilter={setStatusFilter}
+                priorityFilter={priorityFilter}
+                onPriorityFilter={setPriorityFilter}
+                sortOrder={sortOrder}
+                onSortOrder={setSortOrder}
+              />
+              <InboxTable
+                requests={filtered}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                isLoading={isLoading}
+                assignmentOverrides={assignOverrides}
+              />
+            </div>
+
+            <div className="lg:col-span-3">
+              <RequestDetailPanel
+                request={selected}
+                assignee={selectedAssignee}
+                candidateAgents={candidateAgents}
+                onAssign={handleAssign}
+                showCloseMobile
+                onClose={() => setSelectedId(null)}
+                messages={messages}
+                loadingMessages={loadingMessages}
+                response={response}
+                onResponseChange={setResponse}
+                onSendResponse={() => response.trim() && sendResponseMutation.mutate()}
+                sendPending={sendResponseMutation.isPending}
+                updateMutation={updateMutation}
+                onStatusChange={handleStatusChange}
+              />
+            </div>
+          </div>
         </div>
       </div>
-
-      {selected && (
-        <div className="w-[400px] flex-shrink-0 bg-[#FFFFFF] border border-[#E5E7EB] rounded-xl shadow-sm overflow-hidden sticky top-20 self-start">
-          <div className="p-6 border-b border-[#E5E7EB]">
-            <h3 className="font-semibold text-[#111827]">{selected.title}</h3>
-            <p className="text-xs font-mono text-[#6B7280] mt-1">{selected.id}</p>
-          </div>
-          <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
-            <div>
-              <h4 className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-2">
-                Content
-              </h4>
-              <p className="text-sm text-[#111827]">{selected.description || "—"}</p>
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-2 flex items-center gap-1">
-                <FileText className="w-3.5 h-3.5" /> Attachments
-              </h4>
-              <p className="text-sm text-[#6B7280]">No attachments</p>
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-2 flex items-center gap-1">
-                <Cpu className="w-3.5 h-3.5" /> AI Classification
-              </h4>
-              <p className="text-sm text-[#111827] capitalize">{selected.category || "—"}</p>
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-2">
-                Confidence Score
-              </h4>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
-                  <div className="h-full w-4/5 bg-[#7C3AED] rounded-full" />
-                </div>
-                <span className="text-sm font-medium text-[#111827]">~85%</span>
-              </div>
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-2 flex items-center gap-1">
-                <GitBranch className="w-3.5 h-3.5" /> Routing Info
-              </h4>
-              <p className="text-sm text-[#111827]">Department: <span className="capitalize">{selected.category}</span></p>
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-2 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5" /> Activity Timeline
-              </h4>
-              <ul className="space-y-2 text-sm">
-                <li className="text-[#6B7280]">
-                  Created {new Date(selected.created_at).toLocaleString()}
-                </li>
-                <li className="text-[#6B7280]">Status: {selected.status}</li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-2">
-                Conversation
-              </h4>
-              <div className="space-y-3 mb-4">
-                <div className="flex gap-2">
-                  <div className="w-8 h-8 rounded-full bg-[#7C3AED] flex items-center justify-center flex-shrink-0">
-                    <span className="text-white text-xs font-medium">U</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-gray-500">User request</p>
-                    <p className="text-sm text-[#111827] mt-0.5">{selected.description || selected.title || "—"}</p>
-                    <p className="text-xs text-gray-500 mt-1">{new Date(selected.created_at).toLocaleString()}</p>
-                  </div>
-                </div>
-                {loadingMessages ? (
-                  <p className="text-xs text-gray-500">Loading conversation…</p>
-                ) : messages.length === 0 ? (
-                  <p className="text-xs text-gray-500 italic">No responses yet.</p>
-                ) : (
-                  messages.map((m: MessagePayload) => {
-                    const isUser = m.sender_id === selected.requester_id;
-                    return (
-                      <div key={m.id} className="flex gap-2">
-                        <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                            isUser ? "bg-[#7C3AED]" : "bg-[#10b981]"
-                          }`}
-                        >
-                          {isUser ? (
-                            <span className="text-white text-xs font-medium">U</span>
-                          ) : (
-                            <MessageSquare className="w-4 h-4 text-white" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-gray-500">
-                            {isUser ? "User" : "Agent"} •{" "}
-                            {new Date(m.created_at).toLocaleString(undefined, {
-                              dateStyle: "short",
-                              timeStyle: "short",
-                            })}
-                          </p>
-                          <p className="text-sm text-[#111827] mt-0.5 whitespace-pre-wrap">
-                            {m.message_text}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-2">
-                Update Status
-              </h4>
-              <select
-                value={selected.status}
-                onChange={(e) => handleStatusChange(selected.id, e.target.value as RequestStatus)}
-                disabled={updateMutation.isPending}
-                className="w-full px-3 py-2.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/20"
-              >
-                <option value="new">New</option>
-                <option value="in_progress">In Progress</option>
-                <option value="resolved">Resolved</option>
-                <option value="rejected">Rejected</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => handleStatusChange(selected.id, selected.status)}
-                disabled={updateMutation.isPending}
-                className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#7C3AED] text-white rounded-xl text-sm font-medium hover:bg-[#6D28D9] disabled:opacity-50 transition-colors"
-              >
-                {updateMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : null}
-                Update Status
-              </button>
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-2">
-                Response / Comment
-              </h4>
-              <textarea
-                value={response}
-                onChange={(e) => setResponse(e.target.value)}
-                placeholder="Type your response to the user..."
-                rows={3}
-                className="w-full px-3 py-2 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/20"
-              />
-              <button
-                type="button"
-                onClick={() => response.trim() && sendResponseMutation.mutate()}
-                disabled={!response.trim() || sendResponseMutation.isPending}
-                className="mt-2 w-full px-4 py-2.5 bg-[#7C3AED] text-white rounded-xl text-sm font-medium hover:bg-[#6D28D9] disabled:opacity-50"
-              >
-                {sendResponseMutation.isPending ? "Sending..." : "Send Response"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    </Tooltip.Provider>
   );
 }

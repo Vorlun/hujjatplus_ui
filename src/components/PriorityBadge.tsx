@@ -2,9 +2,9 @@ import { memo } from "react";
 import type { RequestPriority } from "../api/requests";
 
 const priorityStyles: Record<RequestPriority, string> = {
-  High: "bg-[#FEE2E2] text-[#DC2626] border-[#FECACA]",
-  Medium: "bg-[#FEF3C7] text-[#D97706] border-[#FDE68A]",
-  Low: "bg-[#F3F4F6] text-[#6B7280] border-[#E5E7EB]",
+  High: "bg-red-100 text-red-600 border-red-200/60",
+  Medium: "bg-yellow-100 text-yellow-700 border-yellow-200/60",
+  Low: "bg-green-100 text-green-700 border-green-200/60",
 };
 
 interface PriorityBadgeProps {
@@ -18,7 +18,7 @@ export const PriorityBadge = memo(function PriorityBadge({
 }: PriorityBadgeProps) {
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium border ${priorityStyles[priority]} ${className}`}
+      className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-none ${priorityStyles[priority]} ${className}`}
     >
       {priority}
     </span>
