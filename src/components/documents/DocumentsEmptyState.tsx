@@ -1,19 +1,13 @@
 import { useCallback, useRef, useState } from "react";
-import { Link } from "react-router";
 import { toast } from "sonner";
 import clsx from "clsx";
-import { FolderOpen, Upload, Sparkles } from "lucide-react";
+import { FolderOpen, Upload, Sparkles, Shapes } from "lucide-react";
 
 interface DocumentsEmptyStateProps {
-  /** When true, secondary button links to help; otherwise shows an in-app tip */
-  learnMoreAsLink?: boolean;
-  learnMoreTo?: string;
+  onBrowseTemplates?: () => void;
 }
 
-export function DocumentsEmptyState({
-  learnMoreAsLink = true,
-  learnMoreTo = "/help",
-}: DocumentsEmptyStateProps) {
+export function DocumentsEmptyState({ onBrowseTemplates }: DocumentsEmptyStateProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
 
@@ -26,20 +20,31 @@ export function DocumentsEmptyState({
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out motion-reduce:animate-none motion-reduce:opacity-100">
-      <div className="mx-auto max-w-lg rounded-2xl border border-slate-200/90 bg-white p-8 shadow-md shadow-slate-200/50 sm:p-10">
+      <div className="relative mx-auto max-w-xl overflow-hidden rounded-3xl border border-slate-200/90 bg-white p-8 shadow-md shadow-slate-200/50 sm:p-10">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-gradient-to-br from-indigo-100/70 to-purple-100/60 blur-2xl"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -bottom-14 -left-14 h-36 w-36 rounded-full bg-gradient-to-br from-blue-100/70 to-cyan-100/50 blur-2xl"
+        />
         <div className="flex flex-col items-center text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500/10 to-indigo-600/10 ring-1 ring-blue-100">
+          <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500/10 to-indigo-600/10 ring-1 ring-blue-100">
             <FolderOpen className="h-8 w-8 text-[#2563EB]" strokeWidth={1.5} aria-hidden />
+            <span className="absolute -bottom-1 -right-1 inline-flex h-6 w-6 items-center justify-center rounded-lg bg-white ring-1 ring-slate-200">
+              <Shapes className="h-3.5 w-3.5 text-violet-500" aria-hidden />
+            </span>
           </div>
           <div className="mt-2 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
             <Sparkles className="h-3 w-3 text-amber-400" aria-hidden />
             Document library
           </div>
           <h2 className="mt-3 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-            No documents yet
+            Start building your team knowledge base
           </h2>
-          <p className="mt-2 max-w-sm text-sm leading-relaxed text-slate-500">
-            Upload and manage your department documents in one place.
+          <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">
+            Keep policies, guides, and playbooks in one searchable space so your team can move faster.
           </p>
 
           <input
@@ -67,33 +72,24 @@ export function DocumentsEmptyState({
               <Upload className="h-4 w-4" aria-hidden />
               Upload Document
             </button>
-            {learnMoreAsLink ? (
-              <Link
-                to={learnMoreTo}
-                className={clsx(
-                  "inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-sm",
-                  "transition-all duration-150 hover:border-slate-300 hover:bg-slate-50 hover:shadow"
-                )}
-              >
-                Learn more
-              </Link>
-            ) : (
-              <button
-                type="button"
-                onClick={() =>
-                  toast.message("About documents", {
-                    description:
-                      "Documents listed here are shared by your organization. Contact an admin to add links, or use department requests to send files.",
-                  })
+            <button
+              type="button"
+              onClick={() => {
+                if (onBrowseTemplates) {
+                  onBrowseTemplates();
+                  return;
                 }
-                className={clsx(
-                  "inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-sm",
-                  "transition-all duration-150 hover:border-slate-300 hover:bg-slate-50 hover:shadow"
-                )}
-              >
-                Learn more
-              </button>
-            )}
+                toast.message("Template library", {
+                  description: "Browse starter templates and adapt them for your team.",
+                });
+              }}
+              className={clsx(
+                "inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-sm",
+                "transition-all duration-150 hover:border-slate-300 hover:bg-slate-50 hover:shadow"
+              )}
+            >
+              Browse templates
+            </button>
           </div>
         </div>
 
